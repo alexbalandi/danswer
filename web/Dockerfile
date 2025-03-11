@@ -175,5 +175,5 @@ ENV NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
 # If you want to run this without compose, specify the ports to 
 # expose via cli
 
-CMD CMD ["node", "server.js"]
+CMD ["node", "server.js"]
 
