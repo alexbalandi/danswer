@@ -46,6 +46,7 @@ export interface SourceSelectorProps {
   toggleFilters: () => void;
   filtersUntoggled: boolean;
   tagsOnLeft: boolean;
+  modal?: boolean;
 }
 
 export function SourceSelector({
@@ -64,6 +65,7 @@ export function SourceSelector({
   toggleFilters,
   filtersUntoggled,
   tagsOnLeft,
+  modal,
 }: SourceSelectorProps) {
   const handleSelect = (source: SourceMetadata) => {
     setSelectedSources((prev: SourceMetadata[]) => {
