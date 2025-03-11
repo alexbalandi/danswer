@@ -1,19 +1,26 @@
-import { ArrayHelpers, FieldArray, Form, Formik } from "formik";
+"use client";
+
+import { Form, Formik } from "formik";
 import * as Yup from "yup";
 import { PopupSpec } from "@/components/admin/connectors/Popup";
-import { createDocumentSet, updateDocumentSet } from "./lib";
-import { ConnectorIndexingStatus, DocumentSet, UserGroup } from "@/lib/types";
 import {
-  BooleanFormField,
-  TextFormField,
-} from "@/components/admin/connectors/Field";
-import { ConnectorTitle } from "@/components/admin/connectors/ConnectorTitle";
-import { Button, Divider, Text } from "@tremor/react";
-import { EE_ENABLED } from "@/lib/constants";
-import { FiUsers } from "react-icons/fi";
+  createDocumentSet,
+  updateDocumentSet,
+  DocumentSetCreationRequest,
+} from "./lib";
+import { ConnectorStatus, DocumentSet, UserGroup, UserRole } from "@/lib/types";
+import { TextFormField } from "@/components/admin/connectors/Field";
+import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
+import { usePaidEnterpriseFeaturesEnabled } from "@/components/settings/usePaidEnterpriseFeaturesEnabled";
+import { IsPublicGroupSelector } from "@/components/IsPublicGroupSelector";
+import React, { useEffect, useState } from "react";
+import { useUser } from "@/components/user/UserProvider";
+import { ConnectorMultiSelect } from "@/components/ConnectorMultiSelect";
+import { NonSelectableConnectors } from "@/components/NonSelectableConnectors";
 
 interface SetCreationPopupProps {
-  ccPairs: ConnectorIndexingStatus<any, any>[];
+  ccPairs: ConnectorStatus<any, any>[];
   userGroups: UserGroup[] | undefined;
   onClose: () => void;
   setPopup: (popupSpec: PopupSpec | null) => void;
@@ -27,32 +34,34 @@ export const DocumentSetCreationForm = ({
   setPopup,
   existingDocumentSet,
 }: SetCreationPopupProps) => {
+  const isPaidEnterpriseFeaturesEnabled = usePaidEnterpriseFeaturesEnabled();
   const isUpdate = existingDocumentSet !== undefined;
+  const [localCcPairs, setLocalCcPairs] = useState(ccPairs);
+  const { user } = useUser();
+
+  useEffect(() => {
+    if (existingDocumentSet?.is_public) {
+      return;
+    }
+  }, [existingDocumentSet?.is_public]);
 
   return (
-    <div>
-      <Formik
+    <div className="max-w-full mx-auto">
+      <Formik<DocumentSetCreationRequest>
         initialValues={{
-          name: existingDocumentSet ? existingDocumentSet.name : "",
-          description: existingDocumentSet
-            ? existingDocumentSet.description
-            : "",
-          cc_pair_ids: existingDocumentSet
-            ? existingDocumentSet.cc_pair_descriptors.map(
-                (ccPairDescriptor) => {
-                  return ccPairDescriptor.id;
-                }
-              )
-            : ([] as number[]),
-          is_public: existingDocumentSet ? existingDocumentSet.is_public : true,
-          users: existingDocumentSet ? existingDocumentSet.users : [],
-          groups: existingDocumentSet ? existingDocumentSet.groups : [],
+          name: existingDocumentSet?.name ?? "",
+          description: existingDocumentSet?.description ?? "",
+          cc_pair_ids:
+            existingDocumentSet?.cc_pair_descriptors.map(
+              (ccPairDescriptor) => ccPairDescriptor.id
+            ) ?? [],
+          is_public: existingDocumentSet?.is_public ?? true,
+          users: existingDocumentSet?.users ?? [],
+          groups: existingDocumentSet?.groups ?? [],
         }}
         validationSchema={Yup.object().shape({
           name: Yup.string().required("Please enter a name for the set"),
-          description: Yup.string().required(
-            "Please enter a description for the set"
-          ),
+          description: Yup.string().optional(),
           cc_pair_ids: Yup.array()
             .of(Yup.number().required())
             .required("Please select at least one connector"),
@@ -70,6 +79,7 @@ export const DocumentSetCreationForm = ({
             response = await updateDocumentSet({
               id: existingDocumentSet.id,
               ...processedValues,
+              users: processedValues.users,
             });
           } else {
             response = await createDocumentSet(processedValues);
@@ -94,170 +104,128 @@ export const DocumentSetCreationForm = ({
           }
         }}
       >
-        {({ isSubmitting, values }) => (
-          <Form>
-            <TextFormField
-              name="name"
-              label="Name:"
-              placeholder="A name for the document set"
-              disabled={isUpdate}
-              autoCompleteDisabled={true}
-            />
-            <TextFormField
-              name="description"
-              label="Description:"
-              placeholder="Describe what the document set represents"
-              autoCompleteDisabled={true}
-            />
+        {(props) => {
+          // Filter visible cc pairs for curator role
+          const visibleCcPairs =
+            user?.role === UserRole.CURATOR
+              ? localCcPairs.filter(
+                  (ccPair) =>
+                    ccPair.access_type === "public" ||
+                    (ccPair.groups.length > 0 &&
+                      props.values.groups.every((group) =>
+                        ccPair.groups.includes(group)
+                      ))
+                )
+              : localCcPairs;
 
-            <Divider />
+          // Filter non-visible cc pairs for curator role
+          const nonVisibleCcPairs =
+            user?.role === UserRole.CURATOR
+              ? localCcPairs.filter(
+                  (ccPair) =>
+                    !(ccPair.access_type === "public") &&
+                    (ccPair.groups.length === 0 ||
+                      !props.values.groups.every((group) =>
+                        ccPair.groups.includes(group)
+                      ))
+                )
+              : [];
 
-            <h2 className="mb-1 font-medium text-base">
-              Pick your connectors:
-            </h2>
-            <p className="mb-3 text-xs">
-              All documents indexed by the selected connectors will be a part of
-              this document set.
-            </p>
-            <FieldArray
-              name="cc_pair_ids"
-              render={(arrayHelpers: ArrayHelpers) => (
-                <div className="mb-3 flex gap-2 flex-wrap">
-                  {ccPairs.map((ccPair) => {
-                    const ind = values.cc_pair_ids.indexOf(ccPair.cc_pair_id);
-                    let isSelected = ind !== -1;
-                    return (
-                      <div
-                        key={`${ccPair.connector.id}-${ccPair.credential.id}`}
-                        className={
-                          `
-                              px-3 
-                              py-1
-                              rounded-lg 
-                              border
-                              border-border 
-                              w-fit 
-                              flex 
-                              cursor-pointer ` +
-                          (isSelected
-                            ? " bg-background-strong"
-                            : " hover:bg-hover")
-                        }
-                        onClick={() => {
-                          if (isSelected) {
-                            arrayHelpers.remove(ind);
-                          } else {
-                            arrayHelpers.push(ccPair.cc_pair_id);
-                          }
-                        }}
-                      >
-                        <div className="my-auto">
-                          <ConnectorTitle
-                            connector={ccPair.connector}
-                            ccPairId={ccPair.cc_pair_id}
-                            ccPairName={ccPair.name}
-                            isLink={false}
-                            showMetadata={false}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            />
+          // Deselect filtered out cc pairs
+          if (user?.role === UserRole.CURATOR) {
+            const visibleCcPairIds = visibleCcPairs.map(
+              (ccPair) => ccPair.cc_pair_id
+            );
+            props.values.cc_pair_ids = props.values.cc_pair_ids.filter((id) =>
+              visibleCcPairIds.includes(id)
+            );
+          }
 
-            {EE_ENABLED && userGroups && userGroups.length > 0 && (
-              <div>
-                <Divider />
-
-                <BooleanFormField
-                  name="is_public"
-                  label="Is Public?"
-                  subtext={
-                    <>
-                      If the document set is public, then it will be visible to{" "}
-                      <b>all users</b>. If it is not public, then only users in
-                      the specified groups will be able to see it.
-                    </>
-                  }
+          return (
+            <Form className="space-y-6 w-full ">
+              <div className="space-y-4 w-full">
+                <TextFormField
+                  name="name"
+                  label="Name:"
+                  placeholder="A name for the document set"
+                  disabled={isUpdate}
+                  autoCompleteDisabled={true}
+                />
+                <TextFormField
+                  name="description"
+                  label="Description:"
+                  placeholder="Describe what the document set represents"
+                  autoCompleteDisabled={true}
+                  optional={true}
                 />
 
-                <Divider />
-                <h2 className="mb-1 font-medium text-base">
-                  Groups with Access
-                </h2>
-                {!values.is_public ? (
+                {isPaidEnterpriseFeaturesEnabled && (
+                  <IsPublicGroupSelector
+                    formikProps={props}
+                    objectName="document set"
+                  />
+                )}
+              </div>
+
+              <Separator className="my-6" />
+
+              <div className="space-y-6">
+                {user?.role === UserRole.CURATOR ? (
                   <>
-                    <Text className="mb-3">
-                      If any groups are specified, then this Document Set will
-                      only be visible to the specified groups. If no groups are
-                      specified, then the Document Set will be visible to all
-                      users.
-                    </Text>
-                    <FieldArray
-                      name="groups"
-                      render={(arrayHelpers: ArrayHelpers) => (
-                        <div className="flex gap-2 flex-wrap">
-                          {userGroups.map((userGroup) => {
-                            const ind = values.groups.indexOf(userGroup.id);
-                            let isSelected = ind !== -1;
-                            return (
-                              <div
-                                key={userGroup.id}
-                                className={
-                                  `
-                              px-3 
-                              py-1
-                              rounded-lg 
-                              border
-                              border-border 
-                              w-fit 
-                              flex 
-                              cursor-pointer ` +
-                                  (isSelected
-                                    ? " bg-background-strong"
-                                    : " hover:bg-hover")
-                                }
-                                onClick={() => {
-                                  if (isSelected) {
-                                    arrayHelpers.remove(ind);
-                                  } else {
-                                    arrayHelpers.push(userGroup.id);
-                                  }
-                                }}
-                              >
-                                <div className="my-auto flex">
-                                  <FiUsers className="my-auto mr-2" />{" "}
-                                  {userGroup.name}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                    <ConnectorMultiSelect
+                      name="cc_pair_ids"
+                      label={`Connectors available to ${
+                        userGroups && userGroups.length > 1
+                          ? "the selected group"
+                          : "the group you curate"
+                      }`}
+                      connectors={visibleCcPairs}
+                      selectedIds={props.values.cc_pair_ids}
+                      onChange={(selectedIds) => {
+                        props.setFieldValue("cc_pair_ids", selectedIds);
+                      }}
+                      placeholder="Search for connectors..."
+                    />
+
+                    <NonSelectableConnectors
+                      connectors={nonVisibleCcPairs}
+                      title={`Connectors not available to the ${
+                        userGroups && userGroups.length > 1
+                          ? `group${
+                              props.values.groups.length > 1 ? "s" : ""
+                            } you have selected`
+                          : "group you curate"
+                      }`}
+                      description="Only connectors that are directly assigned to the group you are trying to add the document set to will be available."
                     />
                   </>
                 ) : (
-                  <Text>
-                    This Document Set is public, so this does not apply. If you
-                    want to control which user groups see this Document Set,
-                    mark it as non-public!
-                  </Text>
+                  <ConnectorMultiSelect
+                    name="cc_pair_ids"
+                    label="Pick your connectors"
+                    connectors={visibleCcPairs}
+                    selectedIds={props.values.cc_pair_ids}
+                    onChange={(selectedIds) => {
+                      props.setFieldValue("cc_pair_ids", selectedIds);
+                    }}
+                    placeholder="Search for connectors..."
+                  />
                 )}
               </div>
-            )}
-            <div className="flex mt-6">
-              <Button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-64 mx-auto"
-              >
-                {isUpdate ? "Update!" : "Create!"}
-              </Button>
-            </div>
-          </Form>
-        )}
+
+              <div className="flex mt-6 pt-4 border-t border-neutral-200">
+                <Button
+                  type="submit"
+                  variant="submit"
+                  disabled={props.isSubmitting}
+                  className="w-56 mx-auto py-1.5 h-auto text-sm"
+                >
+                  {isUpdate ? "Update Document Set" : "Create Document Set"}
+                </Button>
+              </div>
+            </Form>
+          );
+        }}
       </Formik>
     </div>
   );
