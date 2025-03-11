@@ -13,7 +13,7 @@ import {
 } from "react";
 import { FilterManager } from "@/lib/hooks";
 import { CCPairBasicInfo, DocumentSet, Tag } from "@/lib/types";
-import { SourceSelector } from "../shared_chat_search/SearchFilters";
+import { SourceSelector } from "@/components/filters/SourceSelector";
 import { XIcon } from "@/components/icons/icons";
 
 interface ChatFiltersProps {
